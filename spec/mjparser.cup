@@ -1,0 +1,409 @@
+package rs.ac.bg.etf.pp1;
+
+import java_cup.runtime.*;
+import org.apache.log4j.*;
+import rs.ac.bg.etf.pp1.ast.*;
+
+parser code {:
+
+	boolean errorDetected;
+
+	Logger log = Logger.getLogger(getClass());
+   
+   
+    // slede redefinisani metodi za prijavu gresaka radi izmene teksta poruke
+     
+    public void report_fatal_error(String message, Object info) throws java.lang.Exception {
+      done_parsing();
+      report_error(message, info);
+    }
+  
+    public void syntax_error(Symbol cur_token) {
+        report_error("\nSintaksna greska", cur_token);
+    }
+  
+    public void unrecovered_syntax_error(Symbol cur_token) throws java.lang.Exception {
+        report_fatal_error("Fatalna greska, parsiranje se ne moze nastaviti", cur_token);
+    }
+
+    public void report_error(String message, Object info) {
+    	errorDetected = true;
+    	StringBuilder msg = new StringBuilder(message); 
+    	if (info instanceof Symbol)
+            msg.append (" na liniji ").append(((Symbol)info).left);
+        log.error(msg.toString());
+    }
+
+:}
+
+init with {:
+	errorDetected = false;
+:}
+
+scan with {:
+	Symbol s = this.getScanner().next_token();
+	if (s != null && s.value != null) 
+		log.info(s.toString() + " " + s.value.toString());
+	return s;
+:}
+
+terminal PROG, LEFT_CURLY, RIGHT_CURLY, CONST, SEMICOLON, ASSIGN, COMMA, EQUAL, NOT_EQUAL, GRATER, GRATER_EQUAL, LESS, LESS_EQUAL, SWITCH, READ, DOT_DOUBLE;
+terminal PLUS, MINUS, MUL, DIV, MOD, LEFT_SQUARE, RIGHT_SQUARE, ENUM, VOID, OPEN_BRACKET, CLOSED_BRACKET, IF, BREAK, CONTINUE, RETURN, PRINT, FOR, CASE, ELSE;
+terminal INC, DEC, OR, AND, NEW, QUESTION, LENGTH, DOT;
+
+terminal String IDENT;
+terminal Integer NUMBER, BOOL;
+terminal Character CHARACTER;
+
+nonterminal Program, ConstVarEnumDecl, MethodDeclList, ConstDecl, ConstDeclFinal, Constant, MethodDecl, ConstDeclFinalNext, VarDecl, ElseStatement;
+nonterminal AssignOP, Relop, Addop, Mulop, VarArray, VarArrayNext, ConstantNUM, EnumDecl, EnumDeclList, ConstantCHAR, ConstantBOOL;
+nonterminal FormPars, FormParsVarArray, FormParsVarArrayNext, StatementList, VarDeclList, DesignatorStatement, Statement;
+nonterminal CaseList, For_args, ActPars, ActPar, ActParsNext, Unary, ActParsBegin, SwitchExpr, ForStatement;
+nonterminal ProgramName, EnumDeclName, NonTerminalSwitch, NonTerminalFor, Else, CaseNum, Cases, Case, ForStatementStart;
+nonterminal rs.etf.pp1.symboltable.concepts.Struct Factor, FactorSingle, Term, AddopTermList, TernaniTrue, TernaniFalse, Expr, Condition, CondTermList, CondTerm, CondFactList, CondFact, MayCond;
+nonterminal rs.etf.pp1.symboltable.concepts.Struct Type;
+nonterminal rs.etf.pp1.symboltable.concepts.Obj Designator, DesignatorName, DesignatorKind, EnumDeclOne, MayDesg2, MayDesg1, MethodRetName;
+
+precedence left ELSE;
+
+/* "program" ident {ConstDecl | VarDecl | EnumDecl}
+"{" {MethodDecl} "}"*/
+
+Program ::= (Program_prog) PROG ProgramName ConstVarEnumDecl LEFT_CURLY MethodDeclList RIGHT_CURLY
+			|
+			(Program_error)
+		    PROG ProgramName ConstVarEnumDecl 
+		    LEFT_CURLY error RIGHT_CURLY
+		    {:
+		        parser.report_error(
+		            "Greska unutar tela programa", null
+		        );
+		    :}
+		;
+
+ProgramName ::=	(ProgramName) IDENT;
+
+ConstVarEnumDecl ::= 	(ConstVarEnumDecl_const) ConstVarEnumDecl ConstDecl
+						|
+						(ConstVarEnumDecl_var) ConstVarEnumDecl VarDecl
+						|
+						(ConstVarEnumDecl_enum) ConstVarEnumDecl EnumDecl
+						|
+						(ConstVarEnumDecl_eps) /*epsilon*/
+						;
+
+/* const int x = 1; const int x=1, y = 2 ....*/
+ConstDecl ::= (ConstDecl) CONST Type ConstDeclFinal ConstDeclFinalNext SEMICOLON;
+
+/*x = 1*/
+ConstDeclFinal ::= (ConstDeclFinal) IDENT AssignOP Constant;
+
+/*nabrajanje*/
+ConstDeclFinalNext ::= 	(ConstDeclFinalNext_list) COMMA ConstDeclFinal ConstDeclFinalNext
+						|
+						(ConstDeclFinalNext_eps)/*epsilon*/
+						;
+
+/*int a ;   int a, b.......*/
+VarDecl ::= (VarDecl) Type VarArray VarArrayNext SEMICOLON;
+
+/*deo deklaracije: x ili x[]*/
+VarArray ::=	(VarArray_var) IDENT 
+				|
+				(VarArray_array) IDENT LEFT_SQUARE RIGHT_SQUARE
+				;
+
+/*ukoliko nabrajamo vise promenljivih*/
+VarArrayNext ::=	(VarArrayNext_var) COMMA VarArray VarArrayNext
+					|
+					(VarArrayNext_eps) /*epsilon*/
+					;
+					
+/*pre pocetka neke metode moze biti deklarisano vise nekakvih lokalnih promenljivih*/			
+VarDeclList ::= (VarDeclList_next) VarDecl VarDeclList
+				|
+				(VarDeclList_eps) /*epsilon*/
+				;			
+
+/*enum*/			
+EnumDecl ::= (EnumDecl)ENUM EnumDeclName LEFT_CURLY EnumDeclOne EnumDeclList RIGHT_CURLY;
+
+EnumDeclName ::= (EnumDeclName) IDENT;
+
+EnumDeclList ::=	(EnumDeclList_list) COMMA EnumDeclOne EnumDeclList
+					|
+					(EnumDeclList_eps) /*epsilon*/
+					;
+
+/*deo unutar enuma*/
+EnumDeclOne ::=	(EnumDeclOne_decl) IDENT
+				|
+				(EnumDeclOne_init) IDENT ASSIGN ConstantNUM
+				|
+				(EnumDeclOne_error) error:e
+				{: parser.report_error("Oporavak od greske u EnumDecl. Linija: " + eleft, null); :}
+				;
+
+MethodDeclList ::=	(MethodDeclList_list) MethodDeclList MethodDecl
+					|
+					(MethodDecl_eps) /*epsilon*/
+					;
+
+MethodDecl ::= 	(MethodDecl) MethodRetName OPEN_BRACKET FormPars CLOSED_BRACKET VarDeclList LEFT_CURLY StatementList RIGHT_CURLY;
+
+/*koristim da se izabere da li ce pisati void ili ce biti neka povratna vrednost*/
+MethodRetName ::= 	(MethodRetName_type) Type IDENT
+					|
+					(MethodRetName_void) VOID IDENT
+					;
+					
+/*Parametri npr. za neku metodu, nema SEMI na kraju kao VarDecl*/
+FormPars ::=	(FormPars_met) FormParsVarArray FormParsVarArrayNext
+				|
+				(FormPars_eps) /*epsilon*/
+				;
+
+/*deo sa imenom promenljive, niza*/
+FormParsVarArray ::= 	(FormParsVarArray_var) Type IDENT
+						|
+						(FormParsVarArray_array) Type IDENT LEFT_SQUARE RIGHT_SQUARE
+						;
+
+/*deo ukoliko ima vise parametara*/				
+FormParsVarArrayNext ::= 	(FormParsVarArrayNext_var) COMMA FormParsVarArray FormParsVarArrayNext
+							|
+							(FormParsVarArrayNext_eps) /*epsilon*/
+							;
+
+/*tip promenljive int, double, float itd...*/
+Type ::= (Type) IDENT;
+
+Statement ::=	(Statement_ds) DesignatorStatement SEMICOLON
+				|
+				(Statement_if) IF OPEN_BRACKET Condition CLOSED_BRACKET Statement ElseStatement	/*paziti za ovaj else mozda moze doci zbog konflikta, treba dodati precedence*/
+				|
+				(Statement_br) BREAK SEMICOLON
+				|
+				(Statement_continue) CONTINUE SEMICOLON
+				|
+				(Statement_return1) RETURN SEMICOLON
+				|
+				(Statement_return2) RETURN Expr SEMICOLON
+				|
+				(Statement_read) READ OPEN_BRACKET Designator CLOSED_BRACKET SEMICOLON
+				|
+				(Statement_print1) PRINT OPEN_BRACKET Expr CLOSED_BRACKET SEMICOLON
+				|
+				(Statement_print2) PRINT OPEN_BRACKET Expr COMMA ConstantNUM CLOSED_BRACKET SEMICOLON
+				|
+				(Statement_switch) NonTerminalSwitch OPEN_BRACKET SwitchExpr CLOSED_BRACKET LEFT_CURLY Cases RIGHT_CURLY
+				|
+				(Statement_for) NonTerminalFor OPEN_BRACKET For_args CLOSED_BRACKET ForStatement
+				|
+				(Statement_list) LEFT_CURLY StatementList RIGHT_CURLY
+				|
+				(Statement_error) error:e
+				{: parser.report_error("Oporavak od greske u Statementu. Linija: " + eleft, null); :}
+				;
+
+ForStatement ::= (ForStatement) ForStatementStart Statement;
+
+ForStatementStart ::= (ForStatementStart) /*epsilon*/;
+
+SwitchExpr ::= (SwitchExpr) Expr;
+
+NonTerminalSwitch ::= (NonTerminalSwitch) SWITCH;
+
+NonTerminalFor ::= (NonTerminalFor) FOR;
+
+ElseStatement ::=	(ElseStatement_else) Else Statement
+					|
+					(ElseStatement_eps) /*epsilon*/
+					;
+	
+Else ::=	(Else) ELSE;
+				
+Cases ::=	(Cases) CaseList;
+				
+CaseList ::= 	(CaseList_list) Case CaseList
+				|
+				(CaseList_case) Case
+				;
+				
+Case ::= (Case) CASE CaseNum DOT_DOUBLE StatementList;
+
+CaseNum ::= 	(CaseNum) ConstantNUM;
+				
+For_args ::=	(For_args) MayDesg1 SEMICOLON MayCond SEMICOLON MayDesg2;
+
+MayDesg1 ::=	(MayDesg1_yes) DesignatorStatement
+				|
+				(MayDesg1_eps) /*epslion*/
+				;
+				
+MayDesg2 ::=	(MayDesg2_yes) DesignatorStatement
+				|
+				(MayDesg2_eps) /*epslion*/
+				;
+
+MayCond ::= (MayCond_yes) Condition
+			|
+			(MayCond_eps) /*epsilon*/
+			;
+
+StatementList ::=	(StatementList_list) StatementList Statement 
+					|
+					(StatementList_eps) /*epsilon*/
+					;
+					
+DesignatorStatement ::=	(DesignatorStatement_assign) Designator AssignOP Expr
+						|
+						(DesignatorStatement_error) error:e
+						{: parser.report_error("Oporavak od greske u DS. Linija: " + eleft, null); :}
+						|
+						(DesignatorStatement_meth) Designator OPEN_BRACKET ActPars CLOSED_BRACKET
+						|
+						(DesignatorStatement_inc) Designator INC
+						|
+						(DesignatorStatement_dec) Designator DEC
+						;
+						
+/*actual parameters f(x*3, 2 + 1 ....)*/				
+ActPars ::= (ActPars_params) ActParsBegin ActPar ActParsNext
+			|
+			(ActPars_epsilon) ActParsBegin
+			;
+			
+ActParsBegin ::= (ActParsBegin) /*epsilon*/;
+
+ActParsNext ::= (ActParsNext_yes) COMMA ActPar ActParsNext
+				|
+				(ActParsNext_eps) /*epsilon*/
+				;
+				
+ActPar ::=	(ActPar) Expr;
+
+/*uslovi*/
+Condition ::=	(Condition) CondTermList;
+
+/*uslov sa OR operacijom*/
+CondTermList ::=	(CondTermList_list) CondTermList OR CondTerm 
+					|
+					(CondTermList_term) CondTerm
+					;
+					
+CondTerm ::=	(CondTerm) CondFactList;
+
+CondFactList ::=	(CondFactList_list) CondFactList AND CondFact
+					|
+					(CondFactList_fact) CondFact
+					;
+					
+CondFact ::=	(CondFact_expr) AddopTermList
+				|
+				(CondFact_rel) AddopTermList Relop AddopTermList
+				;
+				
+Expr ::=	(Expr_term) AddopTermList
+			|
+			(Expr_cond) Condition QUESTION TernaniTrue DOT_DOUBLE TernaniFalse
+			;
+
+TernaniTrue ::= (TernaniTrue) Expr;
+
+TernaniFalse ::= (TernaniFalse) Expr;
+
+AddopTermList ::=	(AddopTermList_term) Term
+					|
+					(AddopTermList_list) AddopTermList Addop Term
+					;
+
+Term ::=	(Term_factor) Factor
+			|
+			(Term_mulfactor) Term Mulop Factor
+			;
+
+Factor ::=	(Factor) Unary FactorSingle;
+
+FactorSingle ::=	(FactorSingle_var) Designator				/*samo naziv neke promenljive, ili npr obj.field....*/
+					|
+					(FactorSingle_method) Designator OPEN_BRACKET ActPars CLOSED_BRACKET
+					|
+					(FactorSingle_num) NUMBER
+					|
+					(FactorSingle_char) CHARACTER
+					|
+					(FactorSingle_bool) BOOL
+					|
+					(FactorSingle_newArr) NEW Type LEFT_SQUARE Expr RIGHT_SQUARE
+					|
+					(FactorSingle_expr)	OPEN_BRACKET Expr CLOSED_BRACKET
+					;
+
+/*za unarni minus*/
+Unary ::=	(Unary_minus) MINUS
+			|
+			(Unary_eps) /*epsilon*/
+			;
+
+Designator ::=	(DesignatorArrEnum) DesignatorName DesignatorKind
+				|
+				(DesignatorVar) IDENT
+				;
+				
+DesignatorKind ::=	(DesignatorKind_arr) LEFT_SQUARE Expr RIGHT_SQUARE
+    				|
+        			(DesignatorKind_len) DOT LENGTH
+        			|
+			        (DesignatorKind_enum) DOT IDENT
+			        ;
+				
+DesignatorName ::= (DesignatorName) IDENT;
+
+/*konstante*/
+Constant ::= 	(Constant_NUM) ConstantNUM
+				|
+				(Constant_CHAR) ConstantCHAR
+				|
+				(Constant_BOOL) ConstantBOOL
+				;		
+
+/*numericka konstanta*/
+ConstantNUM ::= (ConstantNUM) NUMBER;
+
+/*Konstanta za karakter*/
+ConstantCHAR ::= (ConstantCHAR) CHARACTER;
+
+/*Konstanta za bool*/
+ConstantBOOL ::= (ConstantBOOL) BOOL;
+
+/*operator =*/
+AssignOP ::= (AssignOP) ASSIGN;
+
+/*relacioni operatori*/
+Relop ::= 	(RelOP_eq) EQUAL
+			|
+			(RelOP_noeq) NOT_EQUAL
+			|
+			(RelOP_grater) GRATER
+			|
+			(RelOP_gratereq) GRATER_EQUAL
+			|
+			(RelOP_less) LESS
+			|
+			(RelOP_leseq) LESS_EQUAL
+			;
+			
+/*Plus, minus*/
+Addop ::= 	(AddOP_PLUS) PLUS
+			|
+			(AddOP_MINUS) MINUS
+			;
+			
+/*Mnozenje, deljenje, mod*/
+Mulop ::= 	(Mulop_MUL) MUL
+			|
+			(Mulop_DIV) DIV
+			|
+			(Mulop_MOD) MOD
+			;
